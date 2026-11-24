@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src eventdock-attachment:;">
+  <title>EventDock</title>
+  <link rel="stylesheet" href="eventDock.css">
+</head>
+<body class="image-preview">
+  <main class="preview-layout">
+    <div id="preview-viewport" class="preview-viewport">
+      <div class="preview-canvas"><img id="preview-image" alt=""></div>
+    </div>
+    <div class="record-tools preview-tools">
+      <button type="button" class="record-button" id="preview-zoom-out" data-i18n-title="zoomOut">−</button>
+      <button type="button" class="record-button" id="preview-zoom-in" data-i18n-title="zoomIn">+</button>
+      <button type="button" class="record-button" id="preview-fit" data-i18n="dockFitImage"></button>
+      <button type="button" class="record-button" id="preview-copy" data-i18n="dockCopyImage"></button>
+      <button type="button" class="record-button" id="preview-close" data-i18n="close"></button>
+      <output id="preview-status" aria-live="polite"></output>
+    </div>
+  </main>
+  <script type="module" src="imagePreview.js"></script>
+</body>
+</html>

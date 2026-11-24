@@ -1,0 +1,61 @@
+{
+  "name": "eventdock",
+  "version": "0.2.0",
+  "productName": "EventDock",
+  "description": "EventDock: offline desktop event capture for Windows",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/start-event-dock.mjs",
+    "dev": "node scripts/start-event-dock.mjs --dev",
+    "build:editor": "node scripts/build-event-editor.mjs",
+    "prebuild": "npm run build:editor",
+    "build": "electron-builder --win --publish never",
+    "prebuild:portable": "npm run build:editor",
+    "build:portable": "electron-builder --win portable --publish never"
+  },
+  "build": {
+    "appId": "com.eventdock.desktop",
+    "productName": "EventDock",
+    "npmRebuild": false,
+    "files": [
+      "main.js",
+      "preload/**/*",
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "assets/icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "EventDock",
+      "artifactName": "EventDock-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "EventDock-Portable-${version}.${ext}"
+    }
+  },
+  "dependencies": {
+    "sql.js": "^1.17.0"
+  },
+  "devDependencies": {
+    "@tiptap/core": "^3.35.0",
+    "@tiptap/extension-image": "^3.35.0",
+    "@tiptap/extension-list": "^3.35.0",
+    "@tiptap/extension-table": "^3.35.0",
+    "@tiptap/starter-kit": "^3.35.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^26.7.0",
+    "esbuild": "^0.28.2"
+  }
+}

@@ -1,0 +1,24 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+function subscribe(channel, callback) {
+  ipcRenderer.on(channel, (_event, value) => callback(value));
+}
+
+contextBridge.exposeInMainWorld('api', {
+  getLanguage: () => ipcRenderer.invoke('i18n:get'),
+  onLanguageChanged: callback => subscribe('i18n:changed', callback),
+  getDockState: () => ipcRenderer.invoke('event-dock:get'),
+  onDockState: callback => subscribe('event-dock:state', callback),
+  onDockAnimation: callback => subscribe('event-dock:animate', callback),
+  onSearchStarted: callback => subscribe('event-dock:search-started', callback),
+  onSearchEnded: callback => subscribe('event-dock:search-ended', callback),
+  dockPointer: inside => ipcRenderer.send('event-dock:pointer', inside),
+  getImagePreview: () => ipcRenderer.invoke('event-dock:preview'),
+  getEditorUrl: () => ipcRenderer.invoke('event-dock:editor-url'),
+  getEventRecord: id => ipcRenderer.invoke('event-dock:record', id),
+  stageEvent: (id, revision, value) => ipcRenderer.send('event-dock:stage', id, revision, value),
+  onEventSaved: callback => subscribe('event-dock:save-result', callback),
+  eventAttachment: (id, action, value) => ipcRenderer.invoke('event-dock:attachment', id, action, value),
+  manageEvent: (id, action) => ipcRenderer.invoke('event-dock:manage', id, action),
+  dockAction: (action, value) => ipcRenderer.send('event-dock:action', action, value),
+});
