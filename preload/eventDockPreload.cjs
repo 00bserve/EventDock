@@ -7,6 +7,7 @@ function subscribe(channel, callback) {
 contextBridge.exposeInMainWorld('api', {
   getLanguage: () => ipcRenderer.invoke('i18n:get'),
   onLanguageChanged: callback => subscribe('i18n:changed', callback),
+  dockSettings: (action, value) => ipcRenderer.invoke('event-dock:settings', action, value),
   getDockState: () => ipcRenderer.invoke('event-dock:get'),
   onDockState: callback => subscribe('event-dock:state', callback),
   onDockAnimation: callback => subscribe('event-dock:animate', callback),

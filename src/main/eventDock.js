@@ -1,4 +1,5 @@
-import { BrowserWindow, dialog, globalShortcut, ipcMain, Menu, powerMonitor, screen } from 'electron';
+import { BrowserWindow, dialog, globalShortcut, ipcMain, Menu, powerMonitor, screen, Tray } from 'electron';
+import { getSettings, updateSettings } from './settings.js';
 import { join } from 'node:path';
 import { openEventStore } from './eventStore.js';
 import { createEventRecords, registerAttachmentProtocol } from './eventRecords.js';
@@ -6,9 +7,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getAvailableLanguages, getLanguageState, setLanguage, t } from './i18n.js';
 
 const page = fileURLToPath(new URL('../renderer/eventDock/index.html', import.meta.url));
+const settingsPage = fileURLToPath(new URL('../renderer/eventDock/settings.html', import.meta.url));
 const previewPage = fileURLToPath(new URL('../renderer/eventDock/imagePreview.html', import.meta.url));
 const preload = fileURLToPath(new URL('../../preload/eventDockPreload.cjs', import.meta.url));
 const icon = fileURLToPath(new URL('../../assets/icons/icon.png', import.meta.url));
+const trayIcon = fileURLToPath(new URL('../../assets/icons/icon.ico', import.meta.url));
 const gap = 8;
 const animationDuration = 180;
 const editIdleDelay = 60_000;
@@ -26,7 +29,13 @@ export async function openEventDock(app) {
   let restingHeight;
   const windows = new Map();
   const ready = new Map();
-  let display = screen.getPrimaryDisplay();
+  const preferences = getSettings();
+  const savedDock = preferences.dockPosition;
+  let dockLocked = preferences.dockLocked === true;
+  let display = screen.getAllDisplays().find(item => item.id === savedDock?.displayId) ?? screen.getPrimaryDisplay();
+  let side = savedDock?.side === 'left' ? 'left' : 'right';
+  let vertical = Number.isFinite(savedDock?.vertical) ? Math.max(0, Math.min(1, savedDock.vertical)) : 0.5;
+  let draggingDock = false;
   let pinned = false;
   let detailPinned = false;
   let selected = null;
@@ -36,6 +45,7 @@ export async function openEventDock(app) {
   let editIdleTimer;
   let visible = false;
   let searching = false;
+  let tray;
   let confirmingDelete = false;
   let transition;
   let closingTimer;
@@ -73,22 +83,25 @@ export async function openEventDock(app) {
     const { x, y, width, height } = display.workArea;
     const dockHeight = Math.min(172, height);
     const dockWidth = 42;
-    const dockY = y + Math.round((height - dockHeight) / 2);
+    const left = side === 'left';
+    const compactHeight = Math.min(dockHeight, restingHeight);
+    const center = Math.max(y + compactHeight / 2, Math.min(y + height - compactHeight / 2, y + vertical * height));
+    const dockY = Math.max(y, Math.min(y + height - dockHeight, Math.round(center - dockHeight / 2)));
     const right = x + width;
     const adjacentToDock = screen.getAllDisplays().some(({ id, bounds }) =>
-      id !== display.id && bounds.x === right &&
+      id !== display.id && (left ? bounds.x + bounds.width === x : bounds.x === right) &&
       bounds.y < dockY + dockHeight && bounds.y + bounds.height > dockY
     );
+    const inset = adjacentToDock ? 2 : 0;
     const expandedDock = {
-      x: right - dockWidth - (adjacentToDock ? 2 : 0),
+      x: left ? x + inset : right - dockWidth - inset,
       y: dockY,
       width: dockWidth,
       height: dockHeight,
     };
-    const compactHeight = Math.min(dockHeight, restingHeight);
     const restingDock = {
-      x: expandedDock.x + dockWidth - restingWidth,
-      y: dockY + Math.floor((dockHeight - compactHeight) / 2),
+      x: expandedDock.x + (left ? 0 : dockWidth - restingWidth),
+      y: Math.round(center - compactHeight / 2),
       width: restingWidth,
       height: compactHeight,
     };
@@ -97,16 +110,18 @@ export async function openEventDock(app) {
     // Reused by the renderer when the list changes height.
     const panelHeight = Math.min(panelRequestHeight, maxPanelHeight);
     const panel = {
-      x: expandedDock.x - gap - panelWidth,
-      y: Math.max(y, Math.min(dockY - 52, y + height - panelHeight)),
+      x: left ? expandedDock.x + dockWidth + gap : expandedDock.x - gap - panelWidth,
+      y: Math.max(y, Math.min(Math.round(center - 138), y + height - panelHeight)),
       width: panelWidth,
       height: panelHeight,
     };
-    const room = panel.x - x - gap;
+    const room = left ? right - panel.x - panelWidth - gap : panel.x - x - gap;
     const detailWidth = Math.min(690, room >= 480 ? room : width - dockWidth - gap);
     const detailHeight = Math.min(510, height);
     const detail = {
-      x: room >= 480 ? panel.x - gap - detailWidth : x,
+      x: room >= 480
+        ? (left ? panel.x + panelWidth + gap : panel.x - gap - detailWidth)
+        : (left ? right - detailWidth : x),
       y: Math.max(y, Math.min(panel.y + 12, y + height - detailHeight)),
       width: detailWidth,
       height: detailHeight,
@@ -196,22 +211,28 @@ export async function openEventDock(app) {
     return win;
   }
 
-  const state = () => ({
-    events,
-    startOfToday,
-    startOfTomorrow,
-    todayCount,
-    restingDots,
-    restingOverflow,
-    selected,
-    editOnOpen,
-    pinned,
-    detailPinned,
-    expanded: visible,
-    restingHeight,
-    restingWidth,
-    animationDuration,
-  });
+  const state = () => {
+    const { restingDock, dock } = layout();
+    return {
+      events,
+      startOfToday,
+      startOfTomorrow,
+      todayCount,
+      restingDots,
+      restingOverflow,
+      selected,
+      editOnOpen,
+      pinned,
+      detailPinned,
+      expanded: visible,
+      restingHeight,
+      restingWidth,
+      animationDuration,
+      side,
+      dockLocked,
+      restingCenter: restingDock.y - dock.y + restingDock.height / 2,
+    };
+  };
 
   function publish() {
     const priorHeight = restingHeight;
@@ -272,7 +293,7 @@ export async function openEventDock(app) {
 
   function scheduleCollapse() {
     cancelTransition();
-    if (!visible || pinned || searching || editing || confirmingDelete) return;
+    if (!visible || pinned || searching || editing || confirmingDelete || draggingDock) return;
     transition = setTimeout(() => {
       transition = undefined;
       if (!pointerInside()) collapse();
@@ -283,7 +304,7 @@ export async function openEventDock(app) {
     if (!editing || !visible) return;
     clearTimeout(editIdleTimer);
     editIdleTimer = setTimeout(() => {
-      if (editing && visible && !pinned && !confirmingDelete) collapse();
+      if (editing && visible && !pinned && !confirmingDelete && !draggingDock) collapse();
     }, editIdleDelay);
   }
 
@@ -357,23 +378,63 @@ export async function openEventDock(app) {
   function onDisplayChange() {
     const dock = windows.get('dock');
     if (!dock || dock.isDestroyed()) return;
-    display = screen.getDisplayMatching(dock.getBounds());
+    display = screen.getAllDisplays().find(item => item.id === display.id) ?? screen.getPrimaryDisplay();
+    repositionDock();
+  }
+
+  function repositionDock() {
+    const dock = windows.get('dock');
+    if (!dock || dock.isDestroyed()) return;
     const bounds = layout();
     dock.setBounds(bounds.dock);
     updateDockHitRegion();
     windows.get('panel')?.setBounds(bounds.panel);
-    if (windows.get('detail')?.isVisible()) windows.get('detail').setBounds(bounds.detail);
+    if (draggingDock) {
+      dock.webContents.send('event-dock:state', state());
+    } else {
+      if (windows.get('detail')?.isVisible()) windows.get('detail').setBounds(bounds.detail);
+      publish();
+    }
   }
 
   function changeLanguage(locale) {
     if (!setLanguage(locale)) return;
+    refreshTray();
     for (const win of windows.values()) {
       if (!win.isDestroyed()) win.webContents.send('i18n:changed', getLanguageState());
     }
   }
 
-  function openMenu(view) {
-    const menu = Menu.buildFromTemplate([
+  function openSettingsWindow() {
+    const existing = windows.get('settings');
+    if (existing && !existing.isDestroyed()) {
+      if (existing.isMinimized()) existing.restore();
+      existing.show();
+      existing.focus();
+      return;
+    }
+    const win = new BrowserWindow({
+      width: 500, height: 430, minWidth: 370, minHeight: 370,
+      show: false, title: t('dockSettings'), icon,
+      webPreferences: { preload, contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    windows.set('settings', win);
+    win.removeMenu();
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    win.webContents.on('will-navigate', event => event.preventDefault());
+    win.on('closed', () => windows.delete('settings'));
+    void win.loadFile(settingsPage, { query: { view: 'settings' } }).then(() => {
+      if (win.isDestroyed()) return;
+      win.showInactive();
+      win.focus();
+    }).catch(error => {
+      console.error('[EventDock] Could not open settings:', error);
+      if (!win.isDestroyed()) win.destroy();
+    });
+  }
+
+  function buildControlMenu(fromTray = false) {
+    return Menu.buildFromTemplate([
       ...shortcuts.map(shortcut => ({
         label: t(shortcut.label),
         accelerator: shortcut.accelerator,
@@ -394,10 +455,20 @@ export async function openEventDock(app) {
         })),
       },
       { type: 'separator' },
+      ...(fromTray ? [{ label: t('dockSettings'), click: openSettingsWindow }] : []),
       { label: t('quit'), click: () => app.quit() },
     ]);
+  }
+
+  function refreshTray() {
+    if (!tray || tray.isDestroyed()) return;
+    tray.setToolTip(t('dockName'));
+    tray.setContextMenu(buildControlMenu(true));
+  }
+
+  function openMenu(view) {
     cancelTransition();
-    menu.popup({ window: windows.get(view), callback: scheduleCollapse });
+    buildControlMenu().popup({ window: windows.get(view), callback: scheduleCollapse });
   }
 
   function senderView(event) {
@@ -406,6 +477,26 @@ export async function openEventDock(app) {
     }
   }
 
+  ipcMain.handle('event-dock:settings', (event, action, value) => {
+    if (senderView(event) !== 'settings') return null;
+    if (action === 'lock' && typeof value === 'boolean') {
+      updateSettings({ dockLocked: value });
+      dockLocked = value;
+      if (value && draggingDock) {
+        draggingDock = false;
+        if (editing) resetEditIdle();
+        else scheduleCollapse();
+      }
+      publish();
+    } else if (action === 'side' && (value === 'left' || value === 'right')) {
+      updateSettings({ dockPosition: { displayId: display.id, side: value, vertical } });
+      side = value;
+      repositionDock();
+    } else if (action === 'language' && typeof value === 'string') {
+      changeLanguage(value);
+    }
+    return { dockLocked, side, language: getLanguageState().preference, languages: getAvailableLanguages() };
+  });
   ipcMain.handle('event-dock:get', event => senderView(event) ? state() : null);
   ipcMain.handle('i18n:get', event => senderView(event) ? getLanguageState() : null);
   ipcMain.handle('event-dock:editor-url', event => {
@@ -449,11 +540,11 @@ export async function openEventDock(app) {
       publish();
       return true;
     }
-    if (action === 'remove' && !confirmingDelete) {
+    if (view === 'detail' && action === 'remove' && !confirmingDelete) {
       confirmingDelete = true;
       cancelTransition();
       try {
-        if (!await records.remove(id, fromPanel)) return false;
+        if (!await records.remove(id)) return false;
         if (selected === id) windows.get('detail')?.close();
         publish();
         return true;
@@ -462,6 +553,11 @@ export async function openEventDock(app) {
         if (editing) resetEditIdle();
         else scheduleCollapse();
       }
+    }
+    if (fromPanel && action === 'archive' && records.flush()) {
+      store.archive(id, !store.get(id).archived);
+      publish();
+      return true;
     }
     if (view === 'detail' && (action === 'archive' || action === 'restore') && records.flush()) {
       store.archive(id, action === 'archive');
@@ -489,6 +585,26 @@ export async function openEventDock(app) {
     if (action === 'activity') return resetEditIdle();
     if (view === 'preview' && action === 'close') return win.close();
     if (action === 'menu' && view !== 'detail') return openMenu(view);
+    if (view === 'dock' && action === 'drag-start' && !dockLocked) {
+      draggingDock = true;
+      cancelTransition();
+    }
+    if (view === 'dock' && draggingDock && (action === 'drag-move' || action === 'drag-end')) {
+      const point = screen.getCursorScreenPoint();
+      display = screen.getDisplayNearestPoint(point);
+      const { x, y, width, height } = display.workArea;
+      side = point.x < x + width / 2 ? 'left' : 'right';
+      vertical = Math.max(0, Math.min(1, (point.y - y) / height));
+      if (action === 'drag-end') draggingDock = false;
+      repositionDock();
+      if (action === 'drag-end') {
+        try { updateSettings({ dockPosition: { displayId: display.id, side, vertical } }); }
+        catch (error) { console.error('[EventDock] Could not save dock position:', error); }
+        if (editing) resetEditIdle();
+        else scheduleCollapse();
+      }
+      return;
+    }
     if (view === 'dock' && action === 'toggle') {
       togglePanel();
     }
@@ -561,6 +677,10 @@ export async function openEventDock(app) {
     shortcut.accelerator = keys.find(key => globalShortcut.register(key, shortcut.action));
     if (!shortcut.accelerator) console.warn('[EventDock] Shortcut unavailable:', keys.join(', '));
   }
+  tray = new Tray(process.platform === 'win32' ? trayIcon : icon);
+  tray.on('click', togglePanel);
+  refreshTray();
+
   const dateTimer = setInterval(refreshDate, 30_000);
   powerMonitor.on('resume', refreshDate);
   const displayEvents = ['display-added', 'display-removed', 'display-metrics-changed'];
@@ -573,6 +693,7 @@ export async function openEventDock(app) {
     }
     clearInterval(dateTimer);
     globalShortcut.unregisterAll();
+    if (tray && !tray.isDestroyed()) tray.destroy();
     powerMonitor.removeListener('resume', refreshDate);
     cancelTransition();
     clearTimeout(closingTimer);

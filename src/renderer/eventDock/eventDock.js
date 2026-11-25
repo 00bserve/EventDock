@@ -5,7 +5,6 @@ const app = document.getElementById('app');
 const api = window.api;
 const icons = {
   check: '<path d="m5 12 4 4L19 6"/>',
-  trash: '<path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M16 3v4M8 3v4M3 10h18"/>',
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>',
@@ -201,10 +200,10 @@ function renderPanel() {
 
   const query = search.value.trim().toLocaleLowerCase(document.documentElement.lang);
   const items = state.events.filter(event => {
-    const inTab = activeTab === 'all' || (activeTab === 'archive' ? event.archived : !event.archived && isToday(event));
+    const inTab = activeTab === 'archive' ? event.archived : !event.archived && (activeTab === 'all' || isToday(event));
     const searchable = [eventTitle(event), event.summary, ...event.tags].join(' ');
     return inTab && searchable.toLocaleLowerCase(document.documentElement.lang).includes(query);
-  });
+  }).sort((a, b) => Number(Boolean(a.completedAt)) - Number(Boolean(b.completedAt)));
   byId('count').textContent = items.length;
   const rows = byId('rows');
   const elements = items.map(sample => {
@@ -233,7 +232,7 @@ function renderPanel() {
     actions.className = 'event-row-actions';
     for (const [action, iconName, label] of [
       ['complete', 'check', sample.completedAt ? 'dockReopenEvent' : 'dockCompleteEvent'],
-      ['remove', 'trash', 'delete'],
+      ['archive', 'archive', sample.archived ? 'dockRestoreEvent' : 'dockArchiveEvent'],
     ]) {
       const control = document.createElement('button');
       control.type = 'button';
@@ -276,6 +275,8 @@ function render() {
     trigger.setAttribute('aria-label', t('dockToday') + ' (' + state.todayCount + ')');
     trigger.style.setProperty('--resting-width', state.restingWidth + 'px');
     trigger.style.setProperty('--resting-height', state.restingHeight + 'px');
+    trigger.style.setProperty('--resting-center', state.restingCenter + 'px');
+    trigger.dataset.side = state.side;
     trigger.setAttribute('aria-expanded', String(state.expanded));
     byId('count').textContent = state.todayCount;
     const indicators = Array.from({ length: state.restingDots }, () =>
@@ -293,6 +294,34 @@ function render() {
 }
 
 const pointerSurface = view === 'dock' ? app.querySelector('.dock-trigger') : document.documentElement;
+let suppressDockClick = false;
+if (view === 'dock') {
+  let drag;
+  pointerSurface.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || drag || state?.dockLocked) return;
+    suppressDockClick = false;
+    drag = { id: event.pointerId, x: event.screenX, y: event.screenY, started: false };
+    pointerSurface.setPointerCapture(event.pointerId);
+  });
+  pointerSurface.addEventListener('pointermove', event => {
+    if (drag?.id !== event.pointerId) return;
+    if (!drag.started) {
+      if (Math.hypot(event.screenX - drag.x, event.screenY - drag.y) < 5) return;
+      drag.started = true;
+      suppressDockClick = true;
+      api.dockAction('drag-start');
+    }
+    api.dockAction('drag-move');
+  });
+  function finishDrag(event) {
+    if (drag?.id !== event.pointerId) return;
+    if (drag.started) api.dockAction('drag-end');
+    drag = undefined;
+  }
+  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    pointerSurface.addEventListener(name, finishDrag);
+  }
+}
 pointerSurface.addEventListener('pointerenter', () => api.dockPointer(true));
 pointerSurface.addEventListener('pointerleave', () => api.dockPointer(false));
 let lastActivity = -Infinity;
@@ -324,6 +353,7 @@ app.addEventListener('click', event => {
     });
     return;
   }
+  if (action === 'toggle' && suppressDockClick && event.detail !== 0) return;
   if (action) api.dockAction(action);
   if (id) api.dockAction('open', id);
   if (tab && tab !== activeTab) {

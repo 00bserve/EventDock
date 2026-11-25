@@ -73,6 +73,14 @@
     "dockPreview": "Visualizar",
     "dockBackToEditor": "Voltar à edição",
     "dockSave": "Salvar",
-    "dockAddTag": "＋ Etiqueta"
+    "dockAddTag": "＋ Etiqueta",
+    "dockSettings": "Configurações",
+    "dockPlacement": "Posição da barra",
+    "dockLockPosition": "Bloquear arrasto",
+    "dockLockHint": "Mesmo bloqueada, a barra abre o painel ao clicar.",
+    "dockEdge": "Borda da tela",
+    "dockLeft": "Esquerda",
+    "dockRight": "Direita",
+    "dockSettingsError": "Não foi possível carregar ou salvar as configurações."
   }
 }

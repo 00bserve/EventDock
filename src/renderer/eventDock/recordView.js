@@ -50,6 +50,7 @@ export function createRecordView(api, formatDate) {
     edit.dataset.i18n = previewing ? 'dockBackToEditor' : 'edit';
     edit.textContent = t(edit.dataset.i18n);
     byId('record-preview').hidden = !value;
+    byId('record-delete').hidden = !value;
     if (record) api.dockAction('editing', { id: record.id, active: value });
     editor.setEditable(value, false);
     byId('record-fields').hidden = !value;

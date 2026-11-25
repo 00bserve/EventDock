@@ -187,8 +187,8 @@ export function createEventRecords({ store, publish, getDetail, getSelected }) {
     return true;
   }
 
-  async function remove(id, panelAction) {
-    const current = () => (panelAction || id === getSelected()) && store.get(id);
+  async function remove(id) {
+    const current = () => id === getSelected() && store.get(id);
     if (!current() || !flush()) return false;
     const options = {
       type: 'warning',
@@ -197,7 +197,7 @@ export function createEventRecords({ store, publish, getDetail, getSelected }) {
       defaultId: 0,
       cancelId: 0,
     };
-    const answer = panelAction ? await dialog.showMessageBox(options) : await dialog.showMessageBox(getDetail(), options);
+    const answer = await dialog.showMessageBox(getDetail(), options);
     if (answer.response !== 1 || !current() || !flush()) return false;
     store.remove(id);
     return true;

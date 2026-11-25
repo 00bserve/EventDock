@@ -73,6 +73,14 @@
     "dockPreview": "预览",
     "dockBackToEditor": "返回编辑",
     "dockSave": "保存",
-    "dockAddTag": "＋ 添加标签"
+    "dockAddTag": "＋ 添加标签",
+    "dockSettings": "设置",
+    "dockPlacement": "侧边入口",
+    "dockLockPosition": "锁定拖动",
+    "dockLockHint": "锁定后仍可点击细条展开面板。",
+    "dockEdge": "停靠边",
+    "dockLeft": "左侧",
+    "dockRight": "右侧",
+    "dockSettingsError": "无法读取或保存设置。"
   }
 }

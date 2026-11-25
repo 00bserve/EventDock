@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self';">
+  <title>EventDock</title>
+  <link rel="stylesheet" href="./settings.css">
+</head>
+<body>
+  <main>
+    <h1 data-i18n="dockSettings"></h1>
+    <fieldset disabled id="preferences">
+      <section>
+        <h2 data-i18n="dockPlacement"></h2>
+        <label class="row">
+          <span><strong data-i18n="dockLockPosition"></strong><small data-i18n="dockLockHint"></small></span>
+          <input id="lock-position" type="checkbox">
+        </label>
+        <label class="row">
+          <strong data-i18n="dockEdge"></strong>
+          <select id="side">
+            <option value="left" data-i18n="dockLeft"></option>
+            <option value="right" data-i18n="dockRight"></option>
+          </select>
+        </label>
+      </section>
+      <section>
+        <label class="row">
+          <strong data-i18n="language"></strong>
+          <select id="language"></select>
+        </label>
+      </section>
+    </fieldset>
+    <output id="status" aria-live="polite"></output>
+  </main>
+  <script type="module" src="./settings.js"></script>
+</body>
+</html>

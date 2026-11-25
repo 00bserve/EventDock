@@ -1,0 +1,14 @@
+:root { font: 14px/1.45 "Segoe UI Variable", "Microsoft YaHei UI", sans-serif; color: #182333; background: #f5f8fc; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 620px; margin: auto; padding: 20px; }
+h1 { margin: 0 0 14px; font-size: 24px; }
+h2 { margin: 0; padding: 12px 14px 5px; color: #536783; font-size: 13px; }
+fieldset { border: 0; margin: 0; min-width: 0; padding: 0; display: grid; gap: 12px; }
+section { background: white; border: 1px solid #dae4f1; border-radius: 14px; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 11px 14px; }
+.row + .row { border-top: 1px solid #edf1f7; }
+small { display: block; margin-top: 3px; color: #536783; }
+select { max-width: 55%; min-width: 104px; padding: 6px 9px; border: 1px solid #cbd9ea; border-radius: 8px; background: #f7faff; color: inherit; font: inherit; }
+input { width: 19px; height: 19px; accent-color: #2164df; }
+output { display: block; margin-top: 10px; color: #a52235; }

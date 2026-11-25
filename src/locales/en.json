@@ -73,6 +73,14 @@
     "dockPreview": "Preview",
     "dockBackToEditor": "Back to editor",
     "dockSave": "Save",
-    "dockAddTag": "＋ Add tag"
+    "dockAddTag": "＋ Add tag",
+    "dockSettings": "Settings",
+    "dockPlacement": "Dock position",
+    "dockLockPosition": "Lock dragging",
+    "dockLockHint": "When locked, the strip still opens the panel on click.",
+    "dockEdge": "Screen edge",
+    "dockLeft": "Left",
+    "dockRight": "Right",
+    "dockSettingsError": "Could not load or save settings."
   }
 }
