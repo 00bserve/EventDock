@@ -1,3 +1,4 @@
+import { reminderStatus } from '../../eventTiming.js';
 import { languageReady, localize, t } from '../shared/i18n.js';
 
 const view = new URLSearchParams(location.search).get('view');
@@ -45,7 +46,7 @@ const views = {
       <header class="panel-header">
         <nav class="tabs" aria-label="">
           <button type="button" data-tab="today">${icon('calendar')}<span data-i18n="dockTabToday"></span></button>
-          <button type="button" data-tab="all">${icon('layers')}<span data-i18n="dockTabAll"></span></button>
+          <button type="button" data-tab="long-term">${icon('layers')}<span data-i18n="dockTabLongTerm"></span></button>
           <button type="button" data-tab="archive">${icon('archive')}<span data-i18n="dockTabArchive"></span></button>
         </nav>
         ${button('pin', 'pin', 'dockPinPanel', true)}
@@ -194,23 +195,29 @@ function renderPanel() {
   }
   search.setAttribute('aria-label', t('dockSearch'));
   byId('list-title').textContent = t({
-    today: 'dockToday', all: 'dockAllEvents', archive: 'dockArchivedEvents',
+    today: 'dockToday', 'long-term': 'dockLongTerm', archive: 'dockArchivedEvents',
   }[activeTab]);
   updatePin(state.pinned);
 
   const query = search.value.trim().toLocaleLowerCase(document.documentElement.lang);
   const items = state.events.filter(event => {
-    const inTab = activeTab === 'archive' ? event.archived : !event.archived && (activeTab === 'all' || isToday(event));
+    const inTab = activeTab === 'archive'
+      ? event.archived
+      : !event.archived && (activeTab === 'today' ? isToday(event) : Boolean(query) || (!event.completedAt && !isToday(event)));
     const searchable = [eventTitle(event), event.summary, ...event.tags].join(' ');
     return inTab && searchable.toLocaleLowerCase(document.documentElement.lang).includes(query);
-  }).sort((a, b) => Number(Boolean(a.completedAt)) - Number(Boolean(b.completedAt)));
+  }).sort((a, b) => Number(Boolean(a.completedAt)) - Number(Boolean(b.completedAt)) || a.eventTime - b.eventTime);
   byId('count').textContent = items.length;
   const rows = byId('rows');
+  const now = Date.now();
   const elements = items.map(sample => {
     const row = document.createElement('div');
     row.className = 'event-row';
     row.dataset.selected = String(sample.id === state.selected);
     row.dataset.completed = String(Boolean(sample.completedAt));
+    row.dataset.priority = String(sample.priority);
+    const overdue = !sample.archived && !sample.completedAt && sample.eventTime < state.overdueBefore;
+    row.dataset.overdue = String(overdue);
 
     const open = document.createElement('button');
     open.type = 'button';
@@ -221,11 +228,19 @@ function renderPanel() {
       textElement('time', 'event-row-time', formatDate(sample)),
       textElement('span', 'event-row-title', eventTitle(sample)),
     );
-    if (sample.draft) open.title = t('dockDraft');
+    const priorityLabel = t(['dockPriorityLow', 'dockPriorityNormal', 'dockPriorityUrgent'][sample.priority]);
+    open.title = [sample.draft ? t('dockDraft') : '', overdue ? t('dockOverdue') : '', priorityLabel].filter(Boolean).join(' · ');
     const cue = document.createElement('span');
     cue.className = 'event-row-icon';
     cue.innerHTML = icon(sample.attachment ? 'clip' : 'document');
-    open.append(cue);
+    const reminder = reminderStatus(sample, now);
+    const badge = document.createElement('span');
+    badge.className = 'event-reminder';
+    if (reminder !== 'normal') {
+      badge.dataset.reminder = reminder;
+      badge.textContent = t(reminder === 'late' ? 'dockReminderLate' : 'dockReminderSoon');
+    }
+    open.append(badge, cue);
     row.append(open);
 
     const actions = document.createElement('div');
@@ -279,9 +294,11 @@ function render() {
     trigger.dataset.side = state.side;
     trigger.setAttribute('aria-expanded', String(state.expanded));
     byId('count').textContent = state.todayCount;
-    const indicators = Array.from({ length: state.restingDots }, () =>
-      textElement('span', 'dock-dot', '')
-    );
+    const indicators = state.restingIndicators.map(status => {
+      const dot = textElement('span', 'dock-dot', '');
+      dot.dataset.reminder = status;
+      return dot;
+    });
     if (state.restingOverflow) indicators.push(textElement('span', 'dock-overflow', '+'));
     byId('dock-indicators').replaceChildren(...indicators);
   }
@@ -296,6 +313,18 @@ function render() {
 const pointerSurface = view === 'dock' ? app.querySelector('.dock-trigger') : document.documentElement;
 let suppressDockClick = false;
 if (view === 'dock') {
+  api.onOverdueShake(() => {
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const frames = reduced
+      ? [{ filter: 'brightness(1)' }, { filter: 'brightness(0.86)' }, { filter: 'brightness(1)' }]
+      : [
+        { translate: '0 0', scale: '1 1' },
+        { translate: '0 -4px', scale: '1 .9' },
+        { translate: '0 4px', scale: '1 .9' },
+        { translate: '0 0', scale: '1 1' },
+      ];
+    pointerSurface.animate(frames, { duration: 420 });
+  });
   let drag;
   pointerSurface.addEventListener('pointerdown', event => {
     if (event.button !== 0 || drag || state?.dockLocked) return;
@@ -322,22 +351,13 @@ if (view === 'dock') {
     pointerSurface.addEventListener(name, finishDrag);
   }
 }
-pointerSurface.addEventListener('pointerenter', () => api.dockPointer(true));
-pointerSurface.addEventListener('pointerleave', () => api.dockPointer(false));
-let lastActivity = -Infinity;
-for (const name of ['pointermove', 'pointerdown', 'wheel', 'keydown', 'input']) {
-  document.addEventListener(name, () => {
-    const now = performance.now();
-    if (now - lastActivity < 200) return;
-    lastActivity = now;
-    api.dockAction('activity');
-  }, { passive: true });
-}
-
 app.addEventListener('contextmenu', event => {
   if (view === 'detail' || event.target === search) return;
   event.preventDefault();
-  api.dockAction('menu');
+  const row = event.target.closest('.event-row');
+  const id = row?.querySelector('[data-event]')?.dataset.event;
+  if (view === 'panel' && id) api.dockAction('event-menu', id);
+  else api.dockAction('menu');
 });
 app.addEventListener('click', event => {
   const target = event.target.closest('button');
@@ -366,7 +386,7 @@ if (search) {
   search.addEventListener('input', renderPanel);
   api.onSearchStarted(tab => {
     search.hidden = false;
-    if (tab === 'all') {
+    if (tab === 'long-term') {
       activeTab = tab;
       renderPanel();
     }

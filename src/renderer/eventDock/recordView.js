@@ -170,6 +170,13 @@ export function createRecordView(api, formatDate) {
     });
   }
 
+  api.onEventMoved(({ id, eventTime }) => {
+    if (record?.id !== id) return;
+    record.eventTime = eventTime;
+    time.value = localDateTime(eventTime);
+    describe();
+  });
+
   api.onEventSaved(async result => {
     if (result.id !== record?.id || result.revision !== revision) return;
     if (!result.saved) {

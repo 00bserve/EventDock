@@ -26,9 +26,7 @@
     "dockName": "EventDock",
     "dockToday": "Eventos de hoje",
     "dockTabToday": "Hoje",
-    "dockTabAll": "Todos",
     "dockTabArchive": "Arquivo",
-    "dockAllEvents": "Todos os eventos",
     "dockArchivedEvents": "Eventos arquivados",
     "dockEventViews": "Exibições de eventos",
     "dockSearch": "Buscar eventos",
@@ -81,6 +79,16 @@
     "dockEdge": "Borda da tela",
     "dockLeft": "Esquerda",
     "dockRight": "Direita",
-    "dockSettingsError": "Não foi possível carregar ou salvar as configurações."
+    "dockSettingsError": "Não foi possível carregar ou salvar as configurações.",
+    "dockPriority": "Prioridade",
+    "dockPriorityUrgent": "Urgente",
+    "dockPriorityNormal": "Normal",
+    "dockPriorityLow": "Baixa",
+    "dockMoveToday": "Mover para hoje",
+    "dockTabLongTerm": "Longo prazo",
+    "dockLongTerm": "Tarefas de longo prazo",
+    "dockOverdue": "Em atraso",
+    "dockReminderSoon": "Vence em breve",
+    "dockReminderLate": "Vencido"
   }
 }

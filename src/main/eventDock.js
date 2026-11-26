@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog, globalShortcut, ipcMain, Menu, powerMonitor, screen, Tray } from 'electron';
 import { getSettings, updateSettings } from './settings.js';
+import { advanceOverdueReminders, reminderStatus } from '../eventTiming.js';
 import { join } from 'node:path';
 import { openEventStore } from './eventStore.js';
 import { createEventRecords, registerAttachmentProtocol } from './eventRecords.js';
@@ -14,8 +15,14 @@ const icon = fileURLToPath(new URL('../../assets/icons/icon.png', import.meta.ur
 const trayIcon = fileURLToPath(new URL('../../assets/icons/icon.ico', import.meta.url));
 const gap = 8;
 const animationDuration = 180;
-const editIdleDelay = 60_000;
 const restingWidth = 14;
+const dotLimit = 10;
+
+function indicatorColors(events, now) {
+  const counts = { late: 0, soon: 0, normal: 0 };
+  for (const event of events) counts[reminderStatus(event, now)]++;
+  return Object.entries(counts).flatMap(([color, count]) => Array(Math.min(count, dotLimit)).fill(color)).slice(0, dotLimit);
+}
 
 export async function openEventDock(app) {
   const store = await openEventStore(join(app.getPath('appData'), 'EventDock'));
@@ -23,13 +30,16 @@ export async function openEventDock(app) {
   let events;
   let startOfToday;
   let startOfTomorrow;
+  let overdueBefore;
   let todayCount;
-  let restingDots;
+  let todayEvents;
+  let restingIndicators;
   let restingOverflow;
   let restingHeight;
   const windows = new Map();
   const ready = new Map();
   const preferences = getSettings();
+  let overdueReminders = preferences.overdueReminders ?? {};
   const savedDock = preferences.dockPosition;
   let dockLocked = preferences.dockLocked === true;
   let display = screen.getAllDisplays().find(item => item.id === savedDock?.displayId) ?? screen.getPrimaryDisplay();
@@ -42,12 +52,12 @@ export async function openEventDock(app) {
   let previewImage;
   let editOnOpen = false;
   let editing = false;
-  let editIdleTimer;
   let visible = false;
   let searching = false;
   let tray;
   let confirmingDelete = false;
   let transition;
+  let menuOpen = false;
   let closingTimer;
   let visibilityRequest = 0;
 
@@ -61,20 +71,48 @@ export async function openEventDock(app) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     startOfToday = today.getTime();
+    const yesterday = new Date(startOfToday);
+    yesterday.setDate(yesterday.getDate() - 1);
+    overdueBefore = yesterday.getTime();
     today.setDate(today.getDate() + 1);
     startOfTomorrow = today.getTime();
     events = store.list();
-    todayCount = events.filter(event =>
+    todayEvents = events.filter(event =>
       !event.archived && event.eventTime >= startOfToday && event.eventTime < startOfTomorrow
-    ).length;
-    restingDots = Math.min(todayCount, 10);
-    restingOverflow = todayCount > restingDots;
-    restingHeight = Math.max(88, 22 + (restingDots + Number(restingOverflow)) * 12);
+    );
+    todayCount = todayEvents.length;
+    restingIndicators = indicatorColors(todayEvents, Date.now());
+    restingOverflow = todayCount > dotLimit;
+    restingHeight = Math.max(88, 22 + (restingIndicators.length + Number(restingOverflow)) * 12);
+  }
+
+  function checkOverdueReminders(now) {
+    const dock = windows.get('dock');
+    if (!dock || dock.isDestroyed() || !dock.isVisible() || draggingDock) return;
+    const { reminders, shake } = advanceOverdueReminders(events, overdueReminders, now);
+    if (JSON.stringify(reminders) !== JSON.stringify(overdueReminders)) {
+      overdueReminders = reminders;
+      try { updateSettings({ overdueReminders }); }
+      catch (error) { console.error('[EventDock] Could not save overdue reminder history:', error); }
+    }
+    if (shake) dock.webContents.send('event-dock:overdue-shake');
   }
 
   function refreshDate() {
     const now = Date.now();
-    if (now < startOfToday || now >= startOfTomorrow) publish();
+    checkOverdueReminders(now);
+    if (now < startOfToday || now >= startOfTomorrow) {
+      publish();
+      return;
+    }
+    const next = indicatorColors(todayEvents, now);
+    if (!next.every((color, index) => color === restingIndicators[index])) {
+      restingIndicators = next;
+      const dock = windows.get('dock');
+      if (dock && !dock.isDestroyed()) dock.webContents.send('event-dock:state', state());
+    }
+    const panel = windows.get('panel');
+    if (visible && panel && !panel.isDestroyed()) panel.webContents.send('event-dock:state', state());
   }
 
   refreshEvents();
@@ -166,8 +204,8 @@ export async function openEventDock(app) {
       minimizable: view === 'detail',
       maximizable: false,
       alwaysOnTop: view !== 'detail' || detailPinned,
-      skipTaskbar: true,
-      focusable: view === 'detail' || isPreview,
+      skipTaskbar: view !== 'detail',
+      focusable: view !== 'dock',
       autoHideMenuBar: true,
       // The renderer draws the rounded surface; the desktop shows through its corners.
       transparent: true,
@@ -199,7 +237,6 @@ export async function openEventDock(app) {
         editOnOpen = false;
         setEditing(false);
         publish();
-        scheduleCollapse();
       }
     });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -217,8 +254,9 @@ export async function openEventDock(app) {
       events,
       startOfToday,
       startOfTomorrow,
+      overdueBefore,
       todayCount,
-      restingDots,
+      restingIndicators,
       restingOverflow,
       selected,
       editOnOpen,
@@ -272,12 +310,11 @@ export async function openEventDock(app) {
     publish();
     panel.webContents.send('event-dock:animate', 'in');
     if (!panel.isVisible()) panel.showInactive();
-    resetEditIdle();
+    panel.focus();
   }
 
   function collapse() {
     cancelTransition();
-    clearTimeout(editIdleTimer);
     visibilityRequest++;
     visible = false;
     publish();
@@ -291,33 +328,24 @@ export async function openEventDock(app) {
     }, animationDuration + 34);
   }
 
-  function scheduleCollapse() {
+  function dismissOnFocusLoss() {
     cancelTransition();
-    if (!visible || pinned || searching || editing || confirmingDelete || draggingDock) return;
+    if (!visible || pinned || confirmingDelete || draggingDock || menuOpen) return;
     transition = setTimeout(() => {
       transition = undefined;
-      if (!pointerInside()) collapse();
-    }, 400);
-  }
-
-  function resetEditIdle() {
-    if (!editing || !visible) return;
-    clearTimeout(editIdleTimer);
-    editIdleTimer = setTimeout(() => {
-      if (editing && visible && !pinned && !confirmingDelete && !draggingDock) collapse();
-    }, editIdleDelay);
+      if (!BrowserWindow.getFocusedWindow() && !pointerInside() && !menuOpen && !pinned) collapse();
+    }, 50);
   }
 
   function setEditing(value) {
     editing = value;
-    clearTimeout(editIdleTimer);
-    if (editing) {
-      cancelTransition();
-      if (visible) resetEditIdle();
-      else void expand();
-    } else {
-      scheduleCollapse();
-    }
+    if (editing && !visible) void expand();
+  }
+
+  function popupControlMenu(menu, view) {
+    menuOpen = true;
+    cancelTransition();
+    menu.popup({ window: windows.get(view), callback: () => { menuOpen = false; } });
   }
 
   async function openDetail(id, edit = false) {
@@ -370,8 +398,6 @@ export async function openEventDock(app) {
     searching = false;
     const panel = windows.get('panel');
     if (!panel || panel.isDestroyed()) return;
-    if (panel.isFocused()) panel.blur();
-    panel.setFocusable(false);
     panel.webContents.send('event-dock:search-ended');
   }
 
@@ -468,7 +494,54 @@ export async function openEventDock(app) {
 
   function openMenu(view) {
     cancelTransition();
-    buildControlMenu().popup({ window: windows.get(view), callback: scheduleCollapse });
+    popupControlMenu(buildControlMenu(), view);
+  }
+
+  function moveToToday(id) {
+    if (!records.flush()) return;
+    refreshDate();
+    const record = store.get(id);
+    if (!record) return;
+    const date = new Date(record.eventTime);
+    const today = new Date(startOfToday);
+    date.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
+    const eventTime = date.getTime();
+    try {
+      store.moveToToday(id, eventTime);
+      if (selected === id) windows.get('detail')?.webContents.send('event-dock:event-moved', { id, eventTime });
+      publish();
+    } catch (error) {
+      console.error('[EventDock] Could not move event to today:', error);
+      dialog.showErrorBox(t('dockName'), t('dockSaveFailed'));
+    }
+  }
+
+  function openEventMenu(id) {
+    refreshDate();
+    const record = store.get(id);
+    if (!record) return;
+    const menu = Menu.buildFromTemplate([
+      { label: t('dockMoveToday'), click: () => moveToToday(id) },
+      {
+        label: t('dockPriority'),
+        submenu: [
+          ['dockPriorityUrgent', 2], ['dockPriorityNormal', 1], ['dockPriorityLow', 0],
+        ].map(([label, priority]) => ({
+          label: t(label), type: 'radio', checked: priority === record.priority,
+          click: () => {
+            if (!store.get(id)) return;
+            try {
+              store.setPriority(id, priority);
+              publish();
+            } catch (error) {
+              console.error('[EventDock] Could not save priority:', error);
+              dialog.showErrorBox(t('dockName'), t('dockSaveFailed'));
+            }
+          },
+        })),
+      },
+    ]);
+    popupControlMenu(menu, 'panel');
   }
 
   function senderView(event) {
@@ -484,8 +557,6 @@ export async function openEventDock(app) {
       dockLocked = value;
       if (value && draggingDock) {
         draggingDock = false;
-        if (editing) resetEditIdle();
-        else scheduleCollapse();
       }
       publish();
     } else if (action === 'side' && (value === 'left' || value === 'right')) {
@@ -550,8 +621,6 @@ export async function openEventDock(app) {
         return true;
       } finally {
         confirmingDelete = false;
-        if (editing) resetEditIdle();
-        else scheduleCollapse();
       }
     }
     if (fromPanel && action === 'archive' && records.flush()) {
@@ -566,24 +635,16 @@ export async function openEventDock(app) {
     }
     return false;
   });
-  ipcMain.on('event-dock:pointer', (event, inside) => {
-    const view = senderView(event);
-    if (!view || typeof inside !== 'boolean') return;
-    if (inside) {
-      cancelTransition();
-      resetEditIdle();
-    } else {
-      scheduleCollapse();
-    }
-  });
 
   ipcMain.on('event-dock:action', (event, action, value) => {
     const view = senderView(event);
     if (!view) return;
     const win = windows.get(view);
 
-    if (action === 'activity') return resetEditIdle();
     if (view === 'preview' && action === 'close') return win.close();
+    if (view === 'panel' && visible && action === 'event-menu' && typeof value === 'string') {
+      return openEventMenu(value);
+    }
     if (action === 'menu' && view !== 'detail') return openMenu(view);
     if (view === 'dock' && action === 'drag-start' && !dockLocked) {
       draggingDock = true;
@@ -600,8 +661,6 @@ export async function openEventDock(app) {
       if (action === 'drag-end') {
         try { updateSettings({ dockPosition: { displayId: display.id, side, vertical } }); }
         catch (error) { console.error('[EventDock] Could not save dock position:', error); }
-        if (editing) resetEditIdle();
-        else scheduleCollapse();
       }
       return;
     }
@@ -615,8 +674,6 @@ export async function openEventDock(app) {
         pinned = !pinned;
         publish();
         if (pinned) cancelTransition();
-        else if (editing) resetEditIdle();
-        else scheduleCollapse();
       }
       if (action === 'resize' && Number.isInteger(value) && value > 0 && value < 3000) {
         if (panelRequestHeight === value) return;
@@ -624,10 +681,7 @@ export async function openEventDock(app) {
         win.setBounds(layout().panel);
       }
       if (action === 'search' && visible) void focusSearch();
-      if (action === 'end-search') {
-        endSearch();
-        scheduleCollapse();
-      }
+      if (action === 'end-search') endSearch();
     }
     if (view === 'detail') {
       if (action === 'preview' && typeof value === 'string') void openImagePreview(value);
@@ -646,10 +700,8 @@ export async function openEventDock(app) {
 
   const dock = createWindow('dock');
   const panel = createWindow('panel');
-  panel.on('blur', () => {
-    endSearch();
-    scheduleCollapse();
-  });
+  app.on('browser-window-blur', dismissOnFocusLoss);
+  app.on('browser-window-focus', cancelTransition);
   function togglePanel() {
     if (visible) {
       pinned = false;
@@ -662,7 +714,6 @@ export async function openEventDock(app) {
     if (!visible || panel.isDestroyed()) return;
     searching = true;
     cancelTransition();
-    panel.setFocusable(true);
     panel.focus();
     panel.webContents.send('event-dock:search-started', tab);
   }
@@ -670,7 +721,7 @@ export async function openEventDock(app) {
   const shortcuts = [
     { letter: 'N', label: 'dockNewEvent', action: createEvent },
     { letter: 'E', label: 'dockTogglePanel', action: togglePanel },
-    { letter: 'F', label: 'dockSearch', action: () => void focusSearch('all') },
+    { letter: 'F', label: 'dockSearch', action: () => void focusSearch('long-term') },
   ];
   for (const shortcut of shortcuts) {
     const keys = ['Ctrl+Alt+', 'Ctrl+Alt+Shift+'].map(prefix => prefix + shortcut.letter);
@@ -679,6 +730,7 @@ export async function openEventDock(app) {
   }
   tray = new Tray(process.platform === 'win32' ? trayIcon : icon);
   tray.on('click', togglePanel);
+  tray.on('right-click', cancelTransition);
   refreshTray();
 
   const dateTimer = setInterval(refreshDate, 30_000);
@@ -695,9 +747,10 @@ export async function openEventDock(app) {
     globalShortcut.unregisterAll();
     if (tray && !tray.isDestroyed()) tray.destroy();
     powerMonitor.removeListener('resume', refreshDate);
+    app.removeListener('browser-window-blur', dismissOnFocusLoss);
+    app.removeListener('browser-window-focus', cancelTransition);
     cancelTransition();
     clearTimeout(closingTimer);
-    clearTimeout(editIdleTimer);
     for (const name of displayEvents) screen.removeListener(name, onDisplayChange);
   });
 
@@ -705,5 +758,6 @@ export async function openEventDock(app) {
     if (dock.isDestroyed()) return;
     updateDockHitRegion();
     dock.showInactive();
+    checkOverdueReminders(Date.now());
   });
 }

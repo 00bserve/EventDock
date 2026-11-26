@@ -26,9 +26,7 @@
     "dockName": "随记坞",
     "dockToday": "今日事件",
     "dockTabToday": "今日",
-    "dockTabAll": "全部",
     "dockTabArchive": "归档",
-    "dockAllEvents": "全部事件",
     "dockArchivedEvents": "已归档事件",
     "dockEventViews": "事件视图",
     "dockSearch": "搜索事件",
@@ -81,6 +79,16 @@
     "dockEdge": "停靠边",
     "dockLeft": "左侧",
     "dockRight": "右侧",
-    "dockSettingsError": "无法读取或保存设置。"
+    "dockSettingsError": "无法读取或保存设置。",
+    "dockPriority": "优先级",
+    "dockPriorityUrgent": "紧急",
+    "dockPriorityNormal": "普通",
+    "dockPriorityLow": "低",
+    "dockMoveToday": "移到今天",
+    "dockTabLongTerm": "长期",
+    "dockLongTerm": "长期任务",
+    "dockOverdue": "已逾期两天",
+    "dockReminderSoon": "即将到期",
+    "dockReminderLate": "已超时"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "eventdock",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "productName": "EventDock",
   "description": "EventDock: offline desktop event capture for Windows",
   "private": true,

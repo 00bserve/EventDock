@@ -26,9 +26,7 @@
     "dockName": "EventDock",
     "dockToday": "Today's Events",
     "dockTabToday": "Today",
-    "dockTabAll": "All",
     "dockTabArchive": "Archive",
-    "dockAllEvents": "All Events",
     "dockArchivedEvents": "Archived Events",
     "dockEventViews": "Event views",
     "dockSearch": "Search events",
@@ -81,6 +79,16 @@
     "dockEdge": "Screen edge",
     "dockLeft": "Left",
     "dockRight": "Right",
-    "dockSettingsError": "Could not load or save settings."
+    "dockSettingsError": "Could not load or save settings.",
+    "dockPriority": "Priority",
+    "dockPriorityUrgent": "Urgent",
+    "dockPriorityNormal": "Normal",
+    "dockPriorityLow": "Low",
+    "dockMoveToday": "Move to today",
+    "dockTabLongTerm": "Long-term",
+    "dockLongTerm": "Long-term tasks",
+    "dockOverdue": "Overdue",
+    "dockReminderSoon": "Due soon",
+    "dockReminderLate": "Overdue"
   }
 }

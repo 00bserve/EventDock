@@ -62,7 +62,7 @@ export async function openEventStore(directory) {
   }
 
   const version = rows('PRAGMA user_version')[0].user_version;
-  if (version > 2) throw new Error('Event database format is newer than this version.');
+  if (version > 3) throw new Error('Event database format is newer than this version.');
   db.run('PRAGMA foreign_keys = ON');
   if (version === 0) {
     change(() => db.run(`
@@ -96,6 +96,10 @@ export async function openEventStore(directory) {
     change(() => db.run('ALTER TABLE events ADD COLUMN completedAt INTEGER; PRAGMA user_version = 2;'));
   }
 
+  if (version < 3) {
+    change(() => db.run('ALTER TABLE events ADD COLUMN priority INTEGER NOT NULL DEFAULT 1 CHECK (priority BETWEEN 0 AND 2); PRAGMA user_version = 3;'));
+  }
+
   function get(id) {
     const event = rows('SELECT * FROM events WHERE id = ? AND deletedAt IS NULL', [id])[0];
     if (!event) return null;
@@ -118,7 +122,7 @@ export async function openEventStore(directory) {
   return {
     list() {
       return rows(`
-        SELECT id, title, substr(plainText, 1, 160) AS summary, tags, eventTime, archived, draft, completedAt,
+        SELECT id, title, substr(plainText, 1, 160) AS summary, tags, eventTime, archived, draft, completedAt, priority,
           EXISTS(SELECT 1 FROM attachments WHERE eventId = events.id) AS attachment
         FROM events WHERE deletedAt IS NULL ORDER BY eventTime DESC, createdAt DESC
       `).map(event => ({ ...event, tags: JSON.parse(event.tags) }));
@@ -129,7 +133,7 @@ export async function openEventStore(directory) {
       const now = Date.now();
       change(() => db.run(
         'INSERT INTO events (id, content, eventTime, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
-        [id, JSON.stringify(emptyDocument), now, now, now],
+        [id, JSON.stringify(emptyDocument), now + 2 * 60 * 60_000, now, now],
       ));
       return id;
     },
@@ -140,6 +144,13 @@ export async function openEventStore(directory) {
         WHERE id = ? AND deletedAt IS NULL
       `, [record.title, JSON.stringify(record.content), record.plainText, JSON.stringify(record.tags),
         record.eventTime, Date.now(), Number(record.draft), id]));
+    },
+    moveToToday(id, eventTime) {
+      change(() => db.run('UPDATE events SET eventTime = ?, archived = 0, updatedAt = ? WHERE id = ? AND deletedAt IS NULL',
+        [eventTime, Date.now(), id]));
+    },
+    setPriority(id, priority) {
+      change(() => db.run('UPDATE events SET priority = ? WHERE id = ? AND deletedAt IS NULL', [priority, id]));
     },
     toggleComplete(id) {
       const now = Date.now();
